@@ -1,0 +1,25 @@
+# Ambientes Python
+.venv/
+venv/
+env/
+
+# Cache e artefatos Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs e sistema operacional
+.vscode/
+.idea/
+*.code-workspace
+Thumbs.db
+.DS_Store
+
+# Resultados gerados
+/outputs/*
+!/outputs/.gitkeep
