@@ -36,25 +36,32 @@ ainda conflitos de professor/período:
 A folga é confortável em nível agregado; o risco real de inviabilidade está nas restrições H3–H5
 (concorrência de professor/período em horários específicos), não na capacidade bruta.
 
-## 3. Decisões de modelagem a fechar antes de codificar
+## 3. Decisões de modelagem — fechadas
 
-Estas são as pendências que o README já sinaliza ("Confirmar a interpretação da restrição H2") e que
-devem ser resolvidas — e documentadas no notebook — antes da formulação:
+Estas eram as pendências que o README sinalizava ("Confirmar a interpretação da restrição H2") e que
+foram decididas em 15/09/2026 (documentar também no notebook):
 
-1. **Interpretação de H2 (Alocação Exclusiva de Sala).** O campo `local` de cada disciplina é uma
-   **categoria** (`sala`, `lab_info`, `lab_ce`, `lab_fis`), não uma sala física específica — e o
-   `tipo` de cada slot usa o mesmo vocabulário. Logo H2 não fixa uma sala única, e sim restringe a
-   variável `x_{d,t,s}` a salas `s` cujo tipo bate com o `local` da disciplina `d`. Ex.: uma aula com
-   `local: "lab_info"` pode cair em qualquer um dos 4 laboratórios de informática. Isso deve ficar
-   explícito no domínio de `s` (ou zerando `x_{d,t,s}` fora do conjunto compatível).
-2. **Normalização de `periodo`.** Os valores não são consistentes: `"EC8"` e `"EC8 - 2023"`
-   aparecem como períodos distintos (idem `"EC9"`, `"EC10"` sem sufixo de ano, enquanto os demais têm
-   `" - 2023"`). Definir uma função de normalização (ex.: extrair só o prefixo `ECx`) antes de aplicar
-   H5, para não tratar o mesmo período pedagógico como dois períodos diferentes.
-3. **Granularidade de H5 (Conflito de Período/Turma).** Confirmar que a chave de conflito é
-   `periodo` normalizado, com exceção quando `subturma` difere (G1 x G2 podem coincidir no tempo).
-4. **Pesos `w_i` das restrições fracas** — arbitrários por enunciado; escolher valores que não
-   dominem a viabilidade (as fracas nunca podem inviabilizar uma solução que satisfaça as fortes).
+1. **Interpretação de H2 (Alocação Exclusiva de Sala) — DECIDIDO.** O campo `local` de cada
+   disciplina é uma **categoria** (`sala`, `lab_info`, `lab_ce`, `lab_fis`), não uma sala física
+   específica — e o `tipo` de cada slot usa o mesmo vocabulário. Decisão: uma aula pode cair em
+   **qualquer** sala física daquela categoria, desde que (a) o `tipo(s)` bata com o `local(d)` e
+   (b) não haja conflito com outra aula no mesmo horário (H3/H4/H5). Ou seja, H2 não fixa uma sala
+   única por disciplina — a mesma disciplina pode usar salas físicas diferentes em ocorrências
+   diferentes da semana. Isso fica explícito no domínio de `s` (zerando `x_{d,t,s}` fora do conjunto
+   de salas compatíveis com `local(d)`); a exclusividade por horário já é garantida por H3.
+2. **Normalização de `periodo` — DECIDIDO: NÃO normalizar.** Os valores como `"EC8"` e
+   `"EC8 - 2023"` (idem `"EC9"`, `"EC10"` sem sufixo de ano) **não** representam o mesmo período
+   pedagógico — correspondem a planos de curso diferentes no mundo real (turmas de anos/currículos
+   distintos que hoje cursam a mesma disciplina nominal). Decisão: tratar o valor de `periodo` **como
+   string literal**, sem extrair prefixo nem unificar sufixos de ano. `"EC8"` e `"EC8 - 2023"` são
+   dois períodos diferentes para todos os efeitos (H5 inclusive). Não há função de normalização a
+   implementar.
+3. **Granularidade de H5 (Conflito de Período/Turma) — DECIDIDO.** A chave de conflito é `periodo`
+   **literal** (sem normalização, ver item 2), com exceção quando `subturma` difere (G1 × G2 podem
+   coincidir no tempo).
+4. **Pesos `w_i` das restrições fracas** — ainda em aberto; arbitrários por enunciado, escolher
+   valores que não dominem a viabilidade (as fracas nunca podem inviabilizar uma solução que
+   satisfaça as fortes).
 
 ## 4. Conjuntos e parâmetros
 
@@ -62,7 +69,7 @@ devem ser resolvidas — e documentadas no notebook — antes da formulação:
 - `H` — módulos de horário `{M1..M6, T1..T6, N1..N5}`
 - `T = D × H` — slots de tempo
 - `Aulas` — índice das aulas/disciplinas-subturma (linha do JSON de disciplinas), chave natural
-  `(disciplina, periodo_normalizado, subturma)`
+  `(disciplina, periodo, subturma)` — `periodo` usado como string literal (sem normalização, ver §3)
 - `Salas` — salas físicas derivadas do JSON de slots (`37`, `39`, `20‑INF IV`, `23‑ENGSOFT`,
   `24‑CE`, `40‑INF III`, `47‑INF I`, `Lab Física`)
 - `livre(s, t) ∈ {0,1}` — slot `(s,t)` disponível (deriva da lista de slots livres)
@@ -116,7 +123,7 @@ objetivo.
 2. **Dados de entrada** — carregar os dois JSONs, documentar campos (já feito aqui, replicar como
    texto/tabela no notebook).
 3. **Validação e pré-processamento**
-   - normalizar `periodo`;
+   - manter `periodo` como string literal (sem normalização — decisão §3);
    - construir `Salas`, `tipo(s)`, `livre(s,t)`;
    - construir índice de aulas com chave `(disciplina, periodo, subturma)`;
    - checar duplicatas e consistência de professores/tipos.
@@ -148,23 +155,3 @@ requirements.txt       pyomo, pandas, jupyterlab, ipykernel, pytest.
 as funções de carregamento/normalização/relatório usadas no notebook, testando-as com `pytest`
 (ex.: normalização de período, filtro de domínio `x[d,t,s]`), e importar essas funções no notebook
 em vez de duplicar lógica em células.
-
-## 11. Cronograma sugerido (até 01/10/2026)
-
-| Data alvo | Entrega |
-|---|---|
-| 18/09 | Pré-processamento validado (seções 2–3 do notebook) + testes básicos |
-| 22/09 | Modelo com restrições fortes resolvendo com `min Z = 1` (viabilidade confirmada) |
-| 25/09 | Restrições fracas S1 e S3 incorporadas, pesos ajustados |
-| 27/09 | Exportação da grade por sala/período revisada |
-| 29/09 | Slide.pdf com desafios e resultados |
-| 01/10 | Entrega final |
-
-## 12. Riscos e pontos de atenção
-
-- Inconsistência de `periodo` pode mascarar violações de H5 se não normalizada.
-- Domínio de `x[d,t,s]` sem filtro por `tipo(s) == local(d)` e por `livre(s,t)` explode o número de
-  variáveis (8 salas × 554 slots × 58 aulas ≈ 257k sem filtro) — filtrar antes de declarar o `Var`.
-- Pesos das restrições fracas mal calibrados podem tornar o solver lento sem ganho perceptível de
-  qualidade — validar com poucos pesos primeiro.
-- GLPK precisa estar no `PATH` (`glpsol --version`) — já documentado no README.
