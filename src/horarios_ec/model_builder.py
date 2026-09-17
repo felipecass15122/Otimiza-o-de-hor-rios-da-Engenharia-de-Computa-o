@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from itertools import combinations
 from typing import Any
-
+from utils.restricoes import regra_h1, regra_h3, regra_h4, regra_h5
 import pyomo.environ as pyo
 
 
@@ -59,31 +59,54 @@ def criar_modelo_otimizacao(dados_carregados: dict[str, Any]) -> pyo.ConcreteMod
     model.x = pyo.Var(model.X_DOMINIO, domain=pyo.Binary)
     model.obj = pyo.Objective(expr=1, sense=pyo.minimize)
 
-    def regra_h1(m: pyo.ConcreteModel, aula_id: str) -> Any:
-        return sum(m.x[chave] for chave in variaveis_por_aula[aula_id]) == aulas[aula_id]["carga"]
 
-    model.H1_CargaHoraria = pyo.Constraint(model.AULAS, rule=regra_h1)
+    model.H1_CargaHoraria = pyo.Constraint(
+        model.AULAS,
+        rule=lambda m, aula_id: regra_h1(
+            m,
+            aula_id=aula_id,
+            variaveis_por_aula=variaveis_por_aula,
+            aulas=aulas,
+        ),
+    )
 
     model.H3_INDICE = pyo.Set(dimen=3, initialize=tuple(sorted(variaveis_por_sala_horario)))
 
-    def regra_h3(m: pyo.ConcreteModel, sala: str, dia: str, horario: str) -> Any:
-        return sum(m.x[chave] for chave in variaveis_por_sala_horario[(sala, dia, horario)]) <= 1
-
-    model.H3_NaoSobreposicaoSala = pyo.Constraint(model.H3_INDICE, rule=regra_h3)
+    model.H3_NaoSobreposicaoSala = pyo.Constraint(
+        model.H3_INDICE,
+        rule=lambda m, sala, dia, horario: regra_h3(
+            m,
+            sala=sala,
+            dia=dia,
+            horario=horario,
+            variaveis_por_sala_horario=variaveis_por_sala_horario,
+        ),
+    )
 
     model.H4_INDICE = pyo.Set(dimen=3, initialize=tuple(sorted(variaveis_por_professor_horario)))
 
-    def regra_h4(m: pyo.ConcreteModel, professor: str, dia: str, horario: str) -> Any:
-        return sum(m.x[chave] for chave in variaveis_por_professor_horario[(professor, dia, horario)]) <= 1
-
-    model.H4_ConflitoProfessor = pyo.Constraint(model.H4_INDICE, rule=regra_h4)
+    model.H4_ConflitoProfessor = pyo.Constraint(
+        model.H4_INDICE,
+        rule=lambda m, professor, dia, horario: regra_h4(
+            m,
+            professor=professor,
+            dia=dia,
+            horario=horario,
+            variaveis_por_professor_horario=variaveis_por_professor_horario,
+        ),
+    )
 
     model.H5_INDICE = pyo.Set(dimen=4, initialize=tuple(conflitos_h5))
 
-    def regra_h5(m: pyo.ConcreteModel, aula_a: str, aula_b: str, dia: str, horario: str) -> Any:
-        variaveis_a = [m.x[chave] for chave in variaveis_por_aula[aula_a] if chave[1] == dia and chave[2] == horario]
-        variaveis_b = [m.x[chave] for chave in variaveis_por_aula[aula_b] if chave[1] == dia and chave[2] == horario]
-        return sum(variaveis_a) + sum(variaveis_b) <= 1
-
-    model.H5_ConflitoPeriodo = pyo.Constraint(model.H5_INDICE, rule=regra_h5)
+    model.H5_ConflitoPeriodo = pyo.Constraint(
+        model.H5_INDICE,
+        rule=lambda m, aula_a, aula_b, dia, horario: regra_h5(
+            m,
+            aula_a=aula_a,
+            aula_b=aula_b,
+            dia=dia,
+            horario=horario,
+            variaveis_por_aula=variaveis_por_aula,
+        ),
+    )
     return model
