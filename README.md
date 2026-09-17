@@ -26,15 +26,37 @@ jupyter lab
 
 O GLPK não é instalado pelo `pip`; instale-o pelo gerenciador apropriado do seu sistema e confirme que `glpsol --version` funciona antes de resolver o modelo.
 
+## Executar o modelo
+
+Após configurar um solver compatível, execute no ambiente virtual:
+
+```powershell
+$env:PYTHONPATH = "$PWD\src"
+python -m horarios_ec --solver glpk
+```
+
+Como alternativa, se o HiGHS estiver instalado no ambiente Python:
+
+```powershell
+$env:PYTHONPATH = "$PWD\src"
+python -m horarios_ec --solver appsi_highs
+```
+
+O comando carrega os dados, resolve o modelo e imprime a grade semanal por sala.
+
 ## Estrutura
 
 ```text
-data/raw/              Dados JSON originais e imutáveis.
-docs/referencias/      Enunciado fornecido para consulta.
-outputs/               Resultados gerados, não versionados.
-src/horarios_ec/       Código reutilizável do projeto nas próximas etapas.
-tests/                 Testes de dados, modelo e relatórios nas próximas etapas.
-Notebook.ipynb         Entrega principal e roteiro da solução.
+data/raw/              JSONs originais
+docs/referencias/      Enunciado
+src/horarios_ec/       Código do projeto
+  data_loader.py       Leitura, validação e pré-processamento
+  model_builder.py     Modelo Pyomo e restrições
+  reporting.py         Impressão da grade
+  __main__.py          Comando executável
+tests/                 Testes automatizados
+outputs/               Resultados futuros
+Notebook.ipynb         Entrega principal futura
 ```
 
 ## Próximas etapas
