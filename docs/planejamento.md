@@ -47,8 +47,9 @@ foram decididas em 15/09/2026 (documentar também no notebook):
    **qualquer** sala física daquela categoria, desde que (a) o `tipo(s)` bata com o `local(d)` e
    (b) não haja conflito com outra aula no mesmo horário (H3/H4/H5). Ou seja, H2 não fixa uma sala
    única por disciplina — a mesma disciplina pode usar salas físicas diferentes em ocorrências
-   diferentes da semana. Isso fica explícito no domínio de `s` (zerando `x_{d,t,s}` fora do conjunto
-   de salas compatíveis com `local(d)`); a exclusividade por horário já é garantida por H3.
+   diferentes da semana. A compatibilidade fica explícita no domínio de `s` (não criando
+   `x_{d,t,s}` fora do conjunto de salas compatíveis com `local(d)`). A exclusividade é representada
+   por H2: para cada aula e horário, no máximo uma sala física pode ser selecionada.
 2. **Normalização de `periodo` — DECIDIDO: NÃO normalizar.** Os valores como `"EC8"` e
    `"EC8 - 2023"` (idem `"EC9"`, `"EC10"` sem sufixo de ano) **não** representam o mesmo período
    pedagógico — correspondem a planos de curso diferentes no mundo real (turmas de anos/currículos
@@ -91,7 +92,7 @@ Domínio restrito por pré-processamento: só criar `x[d,t,s]` quando `livre(s,t
 | # | Nome | Formulação |
 |---|---|---|
 | H1 | Carga horária semanal | `Σ_{t,s} x[d,t,s] = carga(d)`, ∀d |
-| H2 | Alocação exclusiva de sala | garantida por construção do domínio de `s` (tipo compatível) |
+| H2 | Alocação exclusiva de sala | `Σ_s x[d,t,s] ≤ 1`, ∀(d,t); o domínio garante que `s` tenha tipo compatível |
 | H3 | Não sobreposição de sala | `Σ_d x[d,t,s] ≤ 1`, ∀(t,s) |
 | H4 | Conflito de professor | `Σ_{d: professor(d)=p} Σ_s x[d,t,s] ≤ 1`, ∀p, ∀t |
 | H5 | Conflito de período/turma | `Σ_{d: periodo(d)=k, subturma(d)=g} Σ_s x[d,t,s] ≤ 1`, ∀(k,g), ∀t — agrupando por
@@ -101,9 +102,10 @@ Domínio restrito por pré-processamento: só criar `x[d,t,s]` quando `livre(s,t
 
 - **S1 — Janelas por período:** variável auxiliar de "ocupado" por (período, dia, horário);
   penalizar slots vazios entre o primeiro e o último horário ocupado do dia.
-- **S3 — Balanceamento semanal:** penalizar desvio do número de aulas por dia em relação à média
-  do período (ex.: `Σ_dia |aulas_dia − média|` linearizado com variáveis auxiliares, ou variância
-  aproximada por penalidade de excesso acima de um teto).
+- **S3 — Balanceamento semanal:** para cada período, contar os horários ocupados em cada dia e
+  penalizar o desvio absoluto em relação à média diária da semana:
+  `S3 = Σ_periodo Σ_dia |aulas_dia − média_semanal|`. O valor absoluto é linearizado com uma
+  variável não negativa e duas restrições, uma para o desvio acima e outra para o desvio abaixo.
 
 S2 e S4 ficam como extensão opcional se houver tempo, já que o enunciado exige apenas 2.
 
@@ -129,7 +131,7 @@ objetivo.
    - checar duplicatas e consistência de professores/tipos.
 4. **Formulação PLIM** — declarar `ConcreteModel`, `Set`s, `Param`s, `Var` `x[d,t,s]` restrita ao
    domínio pré-filtrado.
-5. **Restrições fortes** — implementar H1, H3, H4, H5 (H2 embutida no domínio).
+5. **Restrições fortes** — implementar H1, H2, H3, H4 e H5 (compatibilidade de H2 também embutida no domínio).
 6. **Restrições fracas** — implementar S1 e S3 com variáveis auxiliares; validar pesos.
 7. **Solução e relatórios**
    - resolver com GLPK (`glpsol`, já é o solver adotado no README);

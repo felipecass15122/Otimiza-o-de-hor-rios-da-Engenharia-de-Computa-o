@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pyomo.environ as pyo
 import pytest
 
 BASE_DIR = Path(__file__).parent.parent
@@ -64,6 +65,7 @@ def test_loader_rejeita_carga_invalida_e_slot_duplicado() -> None:
 def test_modelo_cria_todas_as_restricoes_fortes(dados_reais: dict) -> None:
     modelo = criar_modelo_otimizacao(dados_reais)
     assert len(modelo.H1_CargaHoraria) == len(dados_reais["aulas"])
+    assert len(modelo.H2_AlocacaoExclusivaSala) > 0
     assert len(modelo.H3_NaoSobreposicaoSala) > 0
     assert len(modelo.H4_ConflitoProfessor) > 0
     assert len(modelo.H5_ConflitoPeriodo) > 0
@@ -82,3 +84,99 @@ def test_h5_permite_subturmas_distintas_e_bloqueia_turma_geral() -> None:
     assert frozenset(("GERAL", "G1")) in pares
     assert frozenset(("GERAL", "G2")) in pares
     assert frozenset(("G1", "G2")) not in pares
+
+
+def test_h2_impede_mesma_aula_em_duas_salas_no_mesmo_horario() -> None:
+    aulas = {
+        "A": {
+            "disciplina": "A",
+            "professor": "P1",
+            "local_tipo": "sala",
+            "periodo": "EC1",
+            "carga": 1,
+            "subturma": None,
+        }
+    }
+    dominio = (
+        ("A", "Seg", "M1", "37"),
+        ("A", "Seg", "M1", "39"),
+    )
+    modelo = criar_modelo_otimizacao({"aulas": aulas, "dominios_validos": dominio})
+    restricao = modelo.H2_AlocacaoExclusivaSala["A", "Seg", "M1"]
+
+    modelo.x["A", "Seg", "M1", "37"].set_value(1)
+    modelo.x["A", "Seg", "M1", "39"].set_value(1)
+
+    assert pyo.value(restricao.body) == pytest.approx(2)
+    assert pyo.value(restricao.upper) == pytest.approx(1)
+
+
+def test_s1_penaliza_janela_entre_aulas_do_mesmo_periodo() -> None:
+    aulas = {
+        "A": {
+            "disciplina": "A",
+            "professor": "P1",
+            "local_tipo": "sala",
+            "periodo": "EC1",
+            "carga": 1,
+            "subturma": None,
+        },
+        "B": {
+            "disciplina": "B",
+            "professor": "P2",
+            "local_tipo": "sala",
+            "periodo": "EC1",
+            "carga": 1,
+            "subturma": None,
+        },
+    }
+    dominio = (
+        ("A", "Seg", "M1", "37"),
+        ("B", "Seg", "M3", "39"),
+    )
+    modelo = criar_modelo_otimizacao(
+        {"aulas": aulas, "dominios_validos": dominio},
+        peso_s3=0,
+    )
+    solver = pyo.SolverFactory("appsi_highs")
+    if not solver.available(exception_flag=False):
+        pytest.skip("Solver appsi_highs indisponível.")
+
+    resultado = solver.solve(modelo)
+
+    assert resultado.solver.termination_condition == pyo.TerminationCondition.optimal
+    assert pyo.value(modelo.s1_janela["EC1", "Seg", "M2"]) == pytest.approx(1)
+    assert pyo.value(modelo.obj) == pytest.approx(1)
+
+
+def test_s3_penaliza_carga_semanal_desbalanceada() -> None:
+    horarios = ("M1", "M2", "M3", "M4", "M5")
+    aulas = {
+        f"A{indice}": {
+            "disciplina": f"A{indice}",
+            "professor": "P1",
+            "local_tipo": "sala",
+            "periodo": "EC1",
+            "carga": 1,
+            "subturma": None,
+        }
+        for indice in range(len(horarios))
+    }
+    dominio = tuple(
+        (f"A{indice}", "Seg", horario, "37")
+        for indice, horario in enumerate(horarios)
+    )
+    modelo = criar_modelo_otimizacao(
+        {"aulas": aulas, "dominios_validos": dominio},
+        peso_s1=0,
+    )
+    solver = pyo.SolverFactory("appsi_highs")
+    if not solver.available(exception_flag=False):
+        pytest.skip("Solver appsi_highs indisponível.")
+
+    resultado = solver.solve(modelo)
+
+    assert resultado.solver.termination_condition == pyo.TerminationCondition.optimal
+    assert pyo.value(modelo.s3_aulas_dia["EC1", "Seg"]) == pytest.approx(5)
+    assert pyo.value(modelo.s3_media_semanal["EC1"]) == pytest.approx(1)
+    assert pyo.value(modelo.obj) == pytest.approx(8)
