@@ -7,6 +7,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from horarios_ec.exceptions import ErroCarregamentoDados
+
 DIAS_VALIDOS = ("Seg", "Ter", "Qua", "Qui", "Sex")
 HORARIOS_VALIDOS = tuple(
     [f"M{indice}" for indice in range(1, 7)]
@@ -36,12 +38,13 @@ def _texto_obrigatorio(item: dict[str, Any], campo: str, contexto: str) -> str:
     return valor
 
 
-def carregar_dados(caminho_aulas: str | Path, caminho_slots: str | Path) -> dict[str, Any]:
+def _carregar_dados(caminho_aulas: str | Path, caminho_slots: str | Path) -> dict[str, Any]:
     """Carrega, valida e prepara os dados para a modelagem em Pyomo.
 
     A variável de decisão só poderá existir nos elementos de
     ``dominios_validos``: slots livres cuja sala física tem o tipo de ambiente
-    solicitado pela aula. Assim, H2 é garantida pela construção do domínio.
+    solicitado pela aula. Assim, a compatibilidade de ambiente exigida por H2
+    é garantida pela construção do domínio.
     """
     aulas_raw = _carregar_lista_json(caminho_aulas, "Arquivo de aulas")
     slots_raw = _carregar_lista_json(caminho_slots, "Arquivo de slots")
@@ -108,6 +111,29 @@ def carregar_dados(caminho_aulas: str | Path, caminho_slots: str | Path) -> dict
         for sala, dia, horario in slots_por_tipo[aula["local_tipo"]]:
             dominios_validos.append((identificador, dia, horario, sala))
 
+    dominio_horarios = tuple(
+        sorted(
+            {
+                (identificador, dia, horario)
+                for identificador, dia, horario, _ in dominios_validos
+            }
+        )
+    )
+    salas_disponiveis_por_tipo_horario_mutavel: dict[
+        tuple[str, str, str], set[str]
+    ] = defaultdict(set)
+    for tipo, slots in slots_por_tipo.items():
+        for sala, dia, horario in slots:
+            salas_disponiveis_por_tipo_horario_mutavel[(tipo, dia, horario)].add(
+                sala
+            )
+    salas_disponiveis_por_tipo_horario = {
+        chave: tuple(sorted(salas))
+        for chave, salas in sorted(
+            salas_disponiveis_por_tipo_horario_mutavel.items()
+        )
+    }
+
     salas_por_tipo = {
         tipo: tuple(sorted(salas)) for tipo, salas in sorted(salas_por_tipo_mutavel.items())
     }
@@ -117,4 +143,22 @@ def carregar_dados(caminho_aulas: str | Path, caminho_slots: str | Path) -> dict
         "salas_por_tipo": salas_por_tipo,
         "slots_validos": frozenset(slots_validos),
         "dominios_validos": tuple(dominios_validos),
+        "dominio_horarios": dominio_horarios,
+        "salas_disponiveis_por_tipo_horario": salas_disponiveis_por_tipo_horario,
     }
+
+
+def carregar_dados(caminho_aulas: str | Path, caminho_slots: str | Path) -> dict[str, Any]:
+    """Carrega os dados e acrescenta contexto às falhas esperadas da etapa.
+
+    A exceção original permanece disponível em ``__cause__`` para que o fluxo
+    principal registre o stack trace completo.
+    """
+    try:
+        return _carregar_dados(caminho_aulas, caminho_slots)
+    except ErroCarregamentoDados:
+        raise
+    except (OSError, TypeError, ValueError, KeyError) as exc:
+        raise ErroCarregamentoDados(
+            f"Falha ao carregar ou validar os dados de entrada: {exc}"
+        ) from exc

@@ -7,7 +7,7 @@ from typing import Any
 
 import pyomo.environ as pyo
 
-ChaveVariavel = tuple[str, str, str, str]
+ChaveVariavel = tuple[str, str, str]
 VariaveisAgrupadas = Mapping[Any, Sequence[ChaveVariavel]]
 
 
@@ -18,42 +18,30 @@ def regra_h1(
     aulas: Mapping[str, Mapping[str, Any]],
 ) -> Any:
     """Exige que cada aula cumpra exatamente sua carga horária semanal."""
-    return sum(modelo.x[chave] for chave in variaveis_por_aula[aula_id]) == aulas[
+    return sum(modelo.y[chave] for chave in variaveis_por_aula[aula_id]) == aulas[
         aula_id
     ]["carga"]
 
 
-def regra_h2(
-    modelo: pyo.ConcreteModel,
-    aula_id: str,
-    dia: str,
-    horario: str,
-    variaveis_por_aula_horario: VariaveisAgrupadas,
-) -> Any:
-    """Limita cada aula a uma única sala física no mesmo horário."""
-    return (
-        sum(
-            modelo.x[chave]
-            for chave in variaveis_por_aula_horario[(aula_id, dia, horario)]
-        )
-        <= 1
-    )
-
-
 def regra_h3(
     modelo: pyo.ConcreteModel,
-    sala: str,
+    tipo: str,
     dia: str,
     horario: str,
-    variaveis_por_sala_horario: VariaveisAgrupadas,
+    variaveis_por_tipo_horario: VariaveisAgrupadas,
+    capacidade_por_tipo_horario: Mapping[tuple[str, str, str], int],
 ) -> Any:
-    """Impede que uma sala receba mais de uma aula no mesmo horário."""
+    """Limita as aulas à quantidade de salas livres do tipo no horário.
+
+    Como toda aula aceita qualquer sala de sua categoria, essa capacidade é
+    equivalente às restrições individuais de não sobreposição de cada sala.
+    """
     return (
         sum(
-            modelo.x[chave]
-            for chave in variaveis_por_sala_horario[(sala, dia, horario)]
+            modelo.y[chave]
+            for chave in variaveis_por_tipo_horario[(tipo, dia, horario)]
         )
-        <= 1
+        <= capacidade_por_tipo_horario[(tipo, dia, horario)]
     )
 
 
@@ -67,7 +55,7 @@ def regra_h4(
     """Impede que um professor ministre mais de uma aula no mesmo horário."""
     return (
         sum(
-            modelo.x[chave]
+            modelo.y[chave]
             for chave in variaveis_por_professor_horario[(professor, dia, horario)]
         )
         <= 1
@@ -76,21 +64,19 @@ def regra_h4(
 
 def regra_h5(
     modelo: pyo.ConcreteModel,
-    aula_a: str,
-    aula_b: str,
+    periodo: str,
+    grupo: str,
     dia: str,
     horario: str,
-    variaveis_por_aula: VariaveisAgrupadas,
+    variaveis_por_conflito_periodo: VariaveisAgrupadas,
 ) -> Any:
-    """Impede a simultaneidade de duas aulas conflitantes do mesmo período."""
-    variaveis_a = [
-        modelo.x[chave]
-        for chave in variaveis_por_aula[aula_a]
-        if chave[1] == dia and chave[2] == horario
-    ]
-    variaveis_b = [
-        modelo.x[chave]
-        for chave in variaveis_por_aula[aula_b]
-        if chave[1] == dia and chave[2] == horario
-    ]
-    return sum(variaveis_a) + sum(variaveis_b) <= 1
+    """Limita a uma aula cada grupo conflitante de um período no horário."""
+    return (
+        sum(
+            modelo.y[chave]
+            for chave in variaveis_por_conflito_periodo[
+                (periodo, grupo, dia, horario)
+            ]
+        )
+        <= 1
+    )

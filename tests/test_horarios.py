@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -13,7 +14,11 @@ BASE_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE_DIR / "src"))
 
 from horarios_ec.data_loader import carregar_dados
+from horarios_ec.exceptions import ErroCarregamentoDados, ErroConstrucaoModelo
 from horarios_ec.model_builder import criar_modelo_otimizacao
+from horarios_ec.reporting import imprimir_grade_horaria
+from horarios_ec import __main__ as cli
+from utils.solucao import atribuir_salas
 
 AULAS_PATH = BASE_DIR / "data" / "raw" / "disciplinas_professores_ec.json"
 SLOTS_PATH = BASE_DIR / "data" / "raw" / "salas_horarios_disponiveis_somente_37_39_labs.json"
@@ -30,6 +35,8 @@ def test_carregamento_dos_dados_reais(dados_reais: dict) -> None:
     assert len(dados_reais["slots_validos"]) == 554
     assert set(dados_reais["salas_por_tipo"]) == {"sala", "lab_info", "lab_ce", "lab_fis"}
     assert len(dados_reais["salas_fisicas"]) == 8
+    assert len(dados_reais["dominio_horarios"]) == 4656
+    assert dados_reais["salas_disponiveis_por_tipo_horario"]
 
 
 def test_dominio_contem_apenas_slots_livres_e_compativeis(dados_reais: dict) -> None:
@@ -65,7 +72,8 @@ def test_loader_rejeita_carga_invalida_e_slot_duplicado() -> None:
 def test_modelo_cria_todas_as_restricoes_fortes(dados_reais: dict) -> None:
     modelo = criar_modelo_otimizacao(dados_reais)
     assert len(modelo.H1_CargaHoraria) == len(dados_reais["aulas"])
-    assert len(modelo.H2_AlocacaoExclusivaSala) > 0
+    assert modelo._h2_estrutural is True
+    assert len(modelo.Y_DOMINIO) == len(dados_reais["dominio_horarios"])
     assert len(modelo.H3_NaoSobreposicaoSala) > 0
     assert len(modelo.H4_ConflitoProfessor) > 0
     assert len(modelo.H5_ConflitoPeriodo) > 0
@@ -80,10 +88,20 @@ def test_h5_permite_subturmas_distintas_e_bloqueia_turma_geral() -> None:
     dominio = tuple((aula_id, "Seg", "M1", "37") for aula_id in aulas)
     modelo = criar_modelo_otimizacao({"aulas": aulas, "dominios_validos": dominio})
 
-    pares = {frozenset((aula_a, aula_b)) for aula_a, aula_b, _, _ in modelo.H5_INDICE}
-    assert frozenset(("GERAL", "G1")) in pares
-    assert frozenset(("GERAL", "G2")) in pares
-    assert frozenset(("G1", "G2")) not in pares
+    assert ("EC1", "G1", "Seg", "M1") in modelo.H5_INDICE
+    assert ("EC1", "G2", "Seg", "M1") in modelo.H5_INDICE
+
+    modelo.y["GERAL", "Seg", "M1"].set_value(0)
+    modelo.y["G1", "Seg", "M1"].set_value(1)
+    modelo.y["G2", "Seg", "M1"].set_value(1)
+    assert pyo.value(modelo.H5_ConflitoPeriodo["EC1", "G1", "Seg", "M1"].body) == 1
+    assert pyo.value(modelo.H5_ConflitoPeriodo["EC1", "G2", "Seg", "M1"].body) == 1
+    assert pyo.value(modelo.s1_ocupado["EC1", "G1", "Seg", "M1"]) == 1
+    assert pyo.value(modelo.s1_ocupado["EC1", "G2", "Seg", "M1"]) == 1
+
+    modelo.y["GERAL", "Seg", "M1"].set_value(1)
+    assert pyo.value(modelo.H5_ConflitoPeriodo["EC1", "G1", "Seg", "M1"].body) == 2
+    assert pyo.value(modelo.H5_ConflitoPeriodo["EC1", "G2", "Seg", "M1"].body) == 2
 
 
 def test_h2_impede_mesma_aula_em_duas_salas_no_mesmo_horario() -> None:
@@ -102,13 +120,69 @@ def test_h2_impede_mesma_aula_em_duas_salas_no_mesmo_horario() -> None:
         ("A", "Seg", "M1", "39"),
     )
     modelo = criar_modelo_otimizacao({"aulas": aulas, "dominios_validos": dominio})
-    restricao = modelo.H2_AlocacaoExclusivaSala["A", "Seg", "M1"]
+    assert tuple(modelo.Y_DOMINIO) == (("A", "Seg", "M1"),)
+    assert modelo.y["A", "Seg", "M1"].is_binary()
+    assert not hasattr(modelo, "x")
 
-    modelo.x["A", "Seg", "M1", "37"].set_value(1)
-    modelo.x["A", "Seg", "M1", "39"].set_value(1)
 
-    assert pyo.value(restricao.body) == pytest.approx(2)
-    assert pyo.value(restricao.upper) == pytest.approx(1)
+def test_h3_limita_aulas_a_capacidade_de_salas_do_tipo() -> None:
+    aulas = {
+        aula_id: {
+            "disciplina": aula_id,
+            "professor": f"P{aula_id}",
+            "local_tipo": "sala",
+            "periodo": f"EC{aula_id}",
+            "carga": 1,
+            "subturma": None,
+        }
+        for aula_id in ("A", "B", "C")
+    }
+    dominio = tuple(
+        (aula_id, "Seg", "M1", sala)
+        for aula_id in aulas
+        for sala in ("37", "39")
+    )
+    modelo = criar_modelo_otimizacao({"aulas": aulas, "dominios_validos": dominio})
+    restricao = modelo.H3_NaoSobreposicaoSala["sala", "Seg", "M1"]
+    for aula_id in aulas:
+        modelo.y[aula_id, "Seg", "M1"].set_value(1)
+
+    assert pyo.value(restricao.body) == pytest.approx(3)
+    assert pyo.value(restricao.upper) == pytest.approx(2)
+
+
+def test_atribuicao_de_salas_e_canonica() -> None:
+    aulas = {
+        aula_id: {
+            "disciplina": aula_id,
+            "professor": f"P{aula_id}",
+            "local_tipo": "sala",
+            "periodo": f"EC{aula_id}",
+            "carga": 1,
+            "subturma": None,
+        }
+        for aula_id in ("A", "B")
+    }
+    dominio = tuple(
+        (aula_id, "Seg", "M1", sala)
+        for aula_id in aulas
+        for sala in ("39", "37")
+    )
+    dados = {
+        "aulas": aulas,
+        "dominios_validos": dominio,
+        "salas_disponiveis_por_tipo_horario": {
+            ("sala", "Seg", "M1"): ("39", "37")
+        },
+    }
+    modelo = criar_modelo_otimizacao(dados)
+    modelo.y["A", "Seg", "M1"].set_value(1)
+    modelo.y["B", "Seg", "M1"].set_value(1)
+
+    assert atribuir_salas(modelo, dados) == (
+        ("A", "Seg", "M1", "37"),
+        ("B", "Seg", "M1", "39"),
+    )
 
 
 def test_s1_penaliza_janela_entre_aulas_do_mesmo_periodo() -> None:
@@ -145,8 +219,10 @@ def test_s1_penaliza_janela_entre_aulas_do_mesmo_periodo() -> None:
     resultado = solver.solve(modelo)
 
     assert resultado.solver.termination_condition == pyo.TerminationCondition.optimal
-    assert pyo.value(modelo.s1_janela["EC1", "Seg", "M2"]) == pytest.approx(1)
-    assert pyo.value(modelo.obj) == pytest.approx(1)
+    grupo = next(grupo for periodo, grupo in modelo.GRUPOS if periodo == "EC1")
+    assert pyo.value(modelo.s1_janela["EC1", grupo, "Seg", "M2"]) == pytest.approx(1)
+    assert pyo.value(modelo.obj) == pytest.approx(5)
+    assert pyo.value(modelo.obj_normalizado) == pytest.approx(1)
 
 
 def test_s3_penaliza_carga_semanal_desbalanceada() -> None:
@@ -177,6 +253,73 @@ def test_s3_penaliza_carga_semanal_desbalanceada() -> None:
     resultado = solver.solve(modelo)
 
     assert resultado.solver.termination_condition == pyo.TerminationCondition.optimal
-    assert pyo.value(modelo.s3_aulas_dia["EC1", "Seg"]) == pytest.approx(5)
-    assert pyo.value(modelo.s3_media_semanal["EC1"]) == pytest.approx(1)
-    assert pyo.value(modelo.obj) == pytest.approx(8)
+    grupo = next(grupo for periodo, grupo in modelo.GRUPOS if periodo == "EC1")
+    assert pyo.value(modelo.s3_aulas_dia["EC1", grupo, "Seg"]) == pytest.approx(5)
+    assert pyo.value(modelo.s3_media_semanal["EC1", grupo]) == pytest.approx(1)
+    assert pyo.value(modelo.obj) == pytest.approx(40)
+    assert pyo.value(modelo.obj_normalizado) == pytest.approx(8)
+
+
+def test_impressao_da_grade_e_separada_por_periodo(capsys: pytest.CaptureFixture) -> None:
+    modelo = pyo.ConcreteModel()
+    dominio = (
+        ("A", "Seg", "M1", "37"),
+        ("B", "Ter", "T1", "39"),
+    )
+    modelo.X_DOMINIO = pyo.Set(dimen=4, initialize=dominio)
+    modelo.x = pyo.Var(modelo.X_DOMINIO, domain=pyo.Binary)
+    for chave in dominio:
+        modelo.x[chave].set_value(1)
+
+    dados = {
+        "aulas": {
+            "A": {
+                "disciplina": "A",
+                "professor": "P1",
+                "periodo": "EC1",
+                "subturma": None,
+            },
+            "B": {
+                "disciplina": "B",
+                "professor": "P2",
+                "periodo": "EC2",
+                "subturma": None,
+            },
+        }
+    }
+
+    imprimir_grade_horaria(modelo, dados)
+    saida = capsys.readouterr().out
+
+    assert "GRADE HORÁRIA — PERÍODO: EC1" in saida
+    assert "GRADE HORÁRIA — PERÍODO: EC2" in saida
+    assert "A [P1] — Sala 37" in saida
+    assert "B [P2] — Sala 39" in saida
+    assert "GRADE HORÁRIA — SALA:" not in saida
+
+
+def test_cli_registra_excecao_ao_carregar_dados(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.ERROR, logger="horarios_ec")
+
+    with patch.object(cli, "carregar_dados", side_effect=ValueError("entrada inválida")):
+        codigo = cli.main(["--solver", "appsi_highs", "--log-level", "ERROR"])
+
+    assert codigo == 3
+    assert "Falha ao carregar ou validar os dados de entrada" in caplog.text
+    assert "entrada inválida" in caplog.text
+
+
+def test_loader_contextualiza_arquivo_inexistente() -> None:
+    caminho_inexistente = BASE_DIR / "arquivo_que_nao_existe.json"
+
+    with pytest.raises(ErroCarregamentoDados, match="Falha ao carregar") as erro:
+        carregar_dados(caminho_inexistente, caminho_inexistente)
+
+    assert isinstance(erro.value.__cause__, FileNotFoundError)
+
+
+def test_model_builder_contextualiza_dados_incompletos() -> None:
+    with pytest.raises(ErroConstrucaoModelo, match="Falha ao validar") as erro:
+        criar_modelo_otimizacao({"aulas": {}})
+
+    assert isinstance(erro.value.__cause__, KeyError)

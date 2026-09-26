@@ -45,11 +45,11 @@ foram decididas em 15/09/2026 (documentar também no notebook):
    disciplina é uma **categoria** (`sala`, `lab_info`, `lab_ce`, `lab_fis`), não uma sala física
    específica — e o `tipo` de cada slot usa o mesmo vocabulário. Decisão: uma aula pode cair em
    **qualquer** sala física daquela categoria, desde que (a) o `tipo(s)` bata com o `local(d)` e
-   (b) não haja conflito com outra aula no mesmo horário (H3/H4/H5). Ou seja, H2 não fixa uma sala
-   única por disciplina — a mesma disciplina pode usar salas físicas diferentes em ocorrências
-   diferentes da semana. A compatibilidade fica explícita no domínio de `s` (não criando
-   `x_{d,t,s}` fora do conjunto de salas compatíveis com `local(d)`). A exclusividade é representada
-   por H2: para cada aula e horário, no máximo uma sala física pode ser selecionada.
+   (b) não haja conflito com outra aula no mesmo horário (H3/H4/H5). A implementação otimizada
+   decide primeiro `y[d,t]`; H2 fica implícita porque existe uma única variável binária por aula e
+   horário. H3 limita as aulas pela quantidade de salas livres da categoria. Depois da solução, uma
+   atribuição canônica associa aulas e salas ordenadas. Essa decomposição é exata porque qualquer
+   sala da categoria correta é compatível com a aula.
 2. **Normalização de `periodo` — DECIDIDO: NÃO normalizar.** Os valores como `"EC8"` e
    `"EC8 - 2023"` (idem `"EC9"`, `"EC10"` sem sufixo de ano) **não** representam o mesmo período
    pedagógico — correspondem a planos de curso diferentes no mundo real (turmas de anos/currículos
@@ -81,21 +81,22 @@ foram decididas em 15/09/2026 (documentar também no notebook):
 ## 5. Variável de decisão
 
 ```
-x[d, t, s] ∈ {0,1}   1 se a aula d é alocada no slot t=(dia,horário) e sala s
+y[d, t] ∈ {0,1}   1 se a aula d é alocada no slot t=(dia,horário)
 ```
 
-Domínio restrito por pré-processamento: só criar `x[d,t,s]` quando `livre(s,t) = 1` e
-`tipo(s) == local(d)` (reduz drasticamente o número de variáveis).
+Domínio restrito por pré-processamento: só criar `y[d,t]` quando existe ao menos uma sala `s` com
+`livre(s,t) = 1` e `tipo(s) == local(d)`. A sala física é escolhida depois da otimização, em ordem
+canônica, respeitando a capacidade agregada imposta por H3.
 
 ## 6. Restrições fortes
 
 | # | Nome | Formulação |
 |---|---|---|
-| H1 | Carga horária semanal | `Σ_{t,s} x[d,t,s] = carga(d)`, ∀d |
-| H2 | Alocação exclusiva de sala | `Σ_s x[d,t,s] ≤ 1`, ∀(d,t); o domínio garante que `s` tenha tipo compatível |
-| H3 | Não sobreposição de sala | `Σ_d x[d,t,s] ≤ 1`, ∀(t,s) |
-| H4 | Conflito de professor | `Σ_{d: professor(d)=p} Σ_s x[d,t,s] ≤ 1`, ∀p, ∀t |
-| H5 | Conflito de período/turma | `Σ_{d: periodo(d)=k, subturma(d)=g} Σ_s x[d,t,s] ≤ 1`, ∀(k,g), ∀t — agrupando por
+| H1 | Carga horária semanal | `Σ_t y[d,t] = carga(d)`, ∀d |
+| H2 | Alocação exclusiva | implícita no domínio binário único `y[d,t]` |
+| H3 | Capacidade de salas | `Σ_{d: local(d)=l} y[d,t] ≤ capacidade(l,t)`, ∀(l,t) |
+| H4 | Conflito de professor | `Σ_{d: professor(d)=p} y[d,t] ≤ 1`, ∀p, ∀t |
+| H5 | Conflito de período/turma | `Σ_{d: periodo(d)=k, subturma(d)=g} y[d,t] ≤ 1`, ∀(k,g), ∀t — agrupando por
 (período, subturma), tratando ausência de subturma como grupo único |
 
 ## 7. Restrições fracas (mínimo 2 — recomendação: S1 + S3)
@@ -106,6 +107,8 @@ Domínio restrito por pré-processamento: só criar `x[d,t,s]` quando `livre(s,t
   penalizar o desvio absoluto em relação à média diária da semana:
   `S3 = Σ_periodo Σ_dia |aulas_dia − média_semanal|`. O valor absoluto é linearizado com uma
   variável não negativa e duas restrições, uma para o desvio acima e outra para o desvio abaixo.
+  A implementação usa variáveis explícitas de carga diária/semanal e multiplica as desigualdades
+  por cinco, evitando coeficientes fracionários e expressões repetidas.
 
 S2 e S4 ficam como extensão opcional se houver tempo, já que o enunciado exige apenas 2.
 
@@ -129,14 +132,15 @@ objetivo.
    - construir `Salas`, `tipo(s)`, `livre(s,t)`;
    - construir índice de aulas com chave `(disciplina, periodo, subturma)`;
    - checar duplicatas e consistência de professores/tipos.
-4. **Formulação PLIM** — declarar `ConcreteModel`, `Set`s, `Param`s, `Var` `x[d,t,s]` restrita ao
-   domínio pré-filtrado.
-5. **Restrições fortes** — implementar H1, H2, H3, H4 e H5 (compatibilidade de H2 também embutida no domínio).
+4. **Formulação PLIM** — declarar `ConcreteModel`, `Set`s, `Param`s e `Var` `y[d,t]` restrita ao
+   domínio pré-filtrado, mantendo a capacidade de salas por categoria e horário.
+5. **Restrições fortes** — implementar H1, H3, H4 e H5; H2 é estrutural na variável binária única.
 6. **Restrições fracas** — implementar S1 e S3 com variáveis auxiliares; validar pesos.
 7. **Solução e relatórios**
-   - resolver com GLPK (`glpsol`, já é o solver adotado no README);
-   - checar status do solver (`ok`/`optimal`, `infeasible`);
-   - exportar grade por sala (linhas = dia×horário, colunas = salas) e por período.
+   - fase 1: resolver H1--H5 e obter uma grade viável;
+   - fase 2: usar a grade como `warm start` e minimizar S1/S3;
+   - aproveitar o incumbente viável quando o limite de tempo for atingido;
+   - atribuir salas físicas canonicamente e exportar as grades por período e por sala.
 8. **Slide.pdf** — desafios de modelagem (H2/normalização de período), resultados (viável? quantas
    janelas restaram?), decisões de peso.
 
@@ -155,5 +159,5 @@ requirements.txt       pyomo, pandas, jupyterlab, ipykernel, pytest.
 
 `src/horarios_ec/` e `tests/` ainda estão vazios (`.gitkeep`) — a recomendação é extrair para lá
 as funções de carregamento/normalização/relatório usadas no notebook, testando-as com `pytest`
-(ex.: normalização de período, filtro de domínio `x[d,t,s]`), e importar essas funções no notebook
+(ex.: normalização de período, filtro de domínio `y[d,t]`), e importar essas funções no notebook
 em vez de duplicar lógica em células.
