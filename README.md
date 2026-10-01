@@ -17,7 +17,16 @@ O fluxo principal já contém:
 - impressão da grade separada por período, com uma visualização adicional por sala;
 - testes automatizados do carregamento, das restrições e do relatório.
 
-O `Notebook.ipynb` e o material de apresentação ainda precisam ser consolidados para a entrega.
+O fluxo de linha de comando, os testes e a documentação de apresentação estão prontos.
+
+## Entrega principal e apresentação
+
+- `Trabalho_de_otimização_de_horarios.ipynb`: entrega principal; executa o
+  fluxo passo a passo no Google Colab, desde o upload dos JSONs até as grades.
+- `docs/guia_apresentacao.md`: roteiro da apresentação, formulação, desafios,
+  resultados, perguntas prováveis e limitações.
+- CLI em `src/horarios_ec/`: versão modular para execução, logs, warm start e
+  otimização em três fases.
 
 ## Fluxo do algoritmo
 
@@ -169,6 +178,11 @@ $env:PYTHONPATH = "$PWD\src"
 ```
 
 ## Executar o modelo
+
+Para a apresentação, prefira o notebook
+`Trabalho_de_otimização_de_horarios.ipynb`, que usa upload dos JSONs no Google
+Colab e apresenta as grades diretamente em tabelas. Os comandos abaixo executam
+a versão modular pela linha de comando.
 
 Com HiGHS:
 
@@ -340,6 +354,7 @@ Validar também a compilação dos módulos:
 ```text
 data/raw/                       JSONs originais
 docs/planejamento.md            decisões e plano de execução
+docs/guia_apresentacao.md       roteiro técnico da apresentação
 docs/referencias/               enunciado do trabalho
 src/horarios_ec/
   __main__.py                   CLI, logging, solver e tratamento do fluxo
@@ -353,13 +368,13 @@ utils/
   solucao.py                    warm start e atribuição canônica de salas
 tests/test_horarios.py          testes automatizados
 outputs/                        relatórios gerados localmente
-Notebook.ipynb                  entrega principal em notebook
+Trabalho_de_otimização_de_horarios.ipynb
+                                entrega principal em notebook/Colab
 requirements.txt               dependências Python
 ```
 
-## Próximas etapas
+## Próximas etapas opcionais
 
-1. Consolidar a implementação e as explicações no `Notebook.ipynb`.
-2. Avaliar pesos diferentes para S1 e S3 e registrar seus impactos.
-3. Executar o modelo completo com tempo adequado e analisar a qualidade da solução.
-4. Exportar os resultados finais e preparar o `Slide.pdf`.
+1. Avaliar pesos diferentes para S1 e S3 e registrar os impactos.
+2. Exportar as grades geradas para arquivos em `outputs/`.
+3. Preparar `Slide.pdf` a partir de `docs/guia_apresentacao.md`.
