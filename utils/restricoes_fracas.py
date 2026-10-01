@@ -244,3 +244,14 @@ def regra_s3_desvio_abaixo(
         carga_semanal_por_grupo[(periodo, grupo)]
         - quantidade_dias * modelo.s3_aulas_dia[periodo, grupo, dia]
     )
+
+def otm_only_seg_m1_m2(dia,
+                       horario: str,
+                       discplina: str) -> bool:
+    """Retorna True se o OTM for apenas para os horários de segunda-feira, M1 e M2."""
+    if discplina in ["Otimi. I"] and dia != "Seg" and horario not in ["M1"]:
+        return False
+    return True 
+
+
+
