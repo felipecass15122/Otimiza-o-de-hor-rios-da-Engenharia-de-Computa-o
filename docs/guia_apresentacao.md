@@ -209,32 +209,3 @@ A tabela por período armazena uma única entrada por `(período, dia, horário)
 Caso G1 e G2 coincidam legalmente, uma das entradas pode sobrescrever a outra
 na visualização. A grade por sala preserva melhor essa situação.
 
-## 13. Respostas para perguntas prováveis
-
-**Por que usar PLIM?**  
-Porque cada alocação é discreta: uma aula acontece ou não em determinado slot.
-
-**Por que não colocar a sala física na variável?**  
-Porque a capacidade por tipo resolve a parte combinatória principal; depois,
-uma associação determinística escolhe a sala real. Isso reduz o número de
-variáveis.
-
-**O que significa `optimal`?**  
-Que HiGHS encontrou a melhor solução para a função objetivo implementada e
-provou gap final de 0%. No estado atual, isso garante principalmente
-viabilidade das restrições fortes.
-
-**Por que HiGHS?**  
-É livre, compatível com Pyomo, estava disponível no ambiente e resolveu o
-modelo rapidamente.
-
-**Qual é a principal evolução futura?**  
-Corrigir formalmente H5 para períodos sem subturmas e implementar S1/S3 com
-variáveis auxiliares reais.
-
-## 14. Fechamento sugerido
-
-“Conseguimos transformar o problema de grade em um modelo inteiro binário,
-encontrar uma alocação viável para todas as 158 aulas e gerar visualizações por
-período e por sala. Os próximos refinamentos são tornar as restrições suaves
-pedagogicamente efetivas e ampliar a validação do conflito de período.”
